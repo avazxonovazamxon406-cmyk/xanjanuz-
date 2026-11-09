@@ -1,0 +1,84 @@
+
+name: XanJanUZ YouTube Auto Bot
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-youtube:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repositoryni yuklash
+        uses: actions/checkout@v4
+
+      - name: YouTube videoni tekshirish
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python3 - <<'PY'
+          import os, json, urllib.request, xml.etree.ElementTree as ET
+
+          channel = "UClX6EbXakVhnoDz4OhNILfw"
+          rss = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel}"
+
+          data = urllib.request.urlopen(rss, timeout=30).read()
+          root = ET.fromstring(data)
+          entry = root.find("{http://www.w3.org/2005/Atom}entry")
+
+          if entry is None:
+              print("Video topilmadi")
+              raise SystemExit(0)
+
+          ns = {
+              "yt": "http://www.youtube.com/xml/schemas/2015",
+              "a": "http://www.w3.org/2005/Atom"
+          }
+
+          video_id = entry.findtext("yt:videoId", namespaces=ns)
+          title = entry.findtext("a:title", namespaces=ns)
+          link = f"https://www.youtube.com/watch?v={video_id}"
+
+          state_file = "last_video.txt"
+
+          old_id = ""
+          if os.path.exists(state_file):
+              old_id = open(state_file).read().strip()
+
+          if not old_id:
+              print("Birinchi ishga tushish: oxirgi video saqlandi.")
+          elif old_id != video_id:
+              message = f"🎬 YANGI VIDEO!\n\n{title}\n\n{link}"
+              payload = json.dumps({
+                  "chat_id": os.environ["CHAT_ID"],
+                  "text": message
+              }).encode()
+
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{os.environ['BOT_TOKEN']}/sendMessage",
+                  data=payload,
+                  headers={"Content-Type": "application/json"}
+              )
+
+              result = json.loads(urllib.request.urlopen(req).read())
+              if not result.get("ok"):
+                  raise Exception(str(result))
+
+              print("Yangi video Telegramga yuborildi!")
+
+          open(state_file, "w").write(video_id)
+          PY
+
+      - name: Video ID ni saqlash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add last_video.txt
+          git diff --cached --quiet || git commit -m "Update latest YouTube video"
+          git push
